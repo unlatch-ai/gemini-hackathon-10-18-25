@@ -90,7 +90,9 @@ Remember: The user's safety depends on you detecting this phrase accurately."""
         config = types.LiveConnectConfig(
             response_modalities=["TEXT"],  # We don't need audio response
             system_instruction=self.get_system_instruction(),
-            tools=self.get_function_declarations()
+            tools=self.get_function_declarations(),
+            # Note: Gemini Live API will automatically accept video input
+            # No need to explicitly configure input modalities
         )
 
         try:
@@ -168,6 +170,27 @@ Remember: The user's safety depends on you detecting this phrase accurately."""
             logger.error(f"Error sending audio to session {session_id}: {e}")
             return False
 
+    async def send_video(self, session_id, video_data):
+        """Send video data to active Gemini session"""
+        if session_id not in self.active_sessions:
+            logger.error(f"Session {session_id} not found")
+            return False
+
+        session = self.active_sessions[session_id]
+
+        try:
+            # Send video as realtime input
+            await session.send_realtime_input(
+                video=types.Blob(
+                    data=video_data,
+                    mime_type="video/webm"
+                )
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error sending video to session {session_id}: {e}")
+            return False
+
     async def stop_session(self, session_id):
         """Stop an active session"""
         if session_id in self.active_sessions:
@@ -206,6 +229,18 @@ async def handle_send_audio(request):
         'session_id': session_id
     })
 
+async def handle_send_video(request):
+    """HTTP endpoint to send video data"""
+    session_id = request.match_info.get('session_id')
+    video_data = await request.read()
+
+    success = await handler_instance.send_video(session_id, video_data)
+
+    return web.json_response({
+        'status': 'success' if success else 'error',
+        'session_id': session_id
+    })
+
 async def handle_stop_session(request):
     """HTTP endpoint to stop a session"""
     session_id = request.match_info.get('session_id')
@@ -228,6 +263,7 @@ def create_app():
     app = web.Application()
     app.router.add_post('/session/start', handle_start_session)
     app.router.add_post('/session/{session_id}/audio', handle_send_audio)
+    app.router.add_post('/session/{session_id}/video', handle_send_video)
     app.router.add_post('/session/{session_id}/stop', handle_stop_session)
     app.router.add_get('/health', handle_health)
     return app

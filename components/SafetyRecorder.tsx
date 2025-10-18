@@ -14,6 +14,8 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     return () => {
@@ -23,6 +25,9 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
       }
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
       }
       if (timerRef.current) {
         clearInterval(timerRef.current);
@@ -34,15 +39,19 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
     try {
       setStatus('connecting');
 
-      // Connect to WebSocket
-      const ws = new WebSocket('ws://localhost:3001/ws/live-session');
+      // Connect to WebSocket (works with ngrok)
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = import.meta.env.VITE_WS_URL || `${protocol}//${window.location.hostname}:3001/ws/live-session`;
+
+      console.log('Connecting to WebSocket:', wsUrl);
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = async () => {
         console.log('✅ WebSocket connected');
         setStatus('connected');
 
-        // Start audio recording
+        // Start video + audio recording
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -50,15 +59,27 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
               sampleRate: 16000,
               echoCancellation: true,
               noiseSuppression: true,
+            },
+            video: {
+              facingMode: 'user', // Use 'environment' for rear camera
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
             }
           });
 
+          streamRef.current = stream;
+
+          // Display video feed
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+          }
+
           const mediaRecorder = new MediaRecorder(stream, {
-            mimeType: 'audio/webm;codecs=opus'
+            mimeType: 'video/webm;codecs=vp8,opus'
           });
           mediaRecorderRef.current = mediaRecorder;
 
-          // Send audio chunks to backend
+          // Send video chunks to backend
           mediaRecorder.ondataavailable = async (event) => {
             if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
               // Convert to base64
@@ -66,8 +87,8 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
               reader.onloadend = () => {
                 const base64 = (reader.result as string).split(',')[1];
                 ws.send(JSON.stringify({
-                  type: 'audio_chunk',
-                  audio: base64
+                  type: 'video_chunk',
+                  video: base64
                 }));
               };
               reader.readAsDataURL(event.data);
@@ -87,9 +108,9 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
           ws.send(JSON.stringify({ type: 'start_recording' }));
 
         } catch (error) {
-          console.error('Error accessing microphone:', error);
+          console.error('Error accessing camera/microphone:', error);
           setStatus('error');
-          alert('Could not access microphone. Please allow microphone permissions.');
+          alert('Could not access camera/microphone. Please allow permissions.');
         }
       };
 
@@ -193,10 +214,32 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
   };
 
   return (
-    <div className="bg-gray-800 rounded-lg shadow-lg p-6 max-w-md mx-auto">
+    <div className="bg-gray-800 rounded-lg shadow-lg p-6 max-w-2xl mx-auto">
       <h2 className="text-2xl font-bold text-white mb-6 text-center">
         🛡️ Safety Monitor
       </h2>
+
+      {/* Video Feed */}
+      <div className="mb-6 relative bg-black rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full h-full object-cover"
+        />
+        {!isRecording && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
+            <p className="text-gray-400 text-lg">📹 Camera feed will appear here</p>
+          </div>
+        )}
+        {isRecording && (
+          <div className="absolute top-4 left-4 bg-red-600 text-white px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-2">
+            <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+            REC
+          </div>
+        )}
+      </div>
 
       {/* Status Indicator */}
       <div className="mb-6">

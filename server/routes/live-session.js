@@ -23,7 +23,7 @@ export function setupWebSocket(server) {
     activeConnections.set(sessionId, ws);
 
     // Send welcome message
-    ws.send(JSON.dumps({
+    ws.send(JSON.stringify({
       type: 'connected',
       sessionId: sessionId,
       message: 'Connected to safety monitoring system'
@@ -43,6 +43,10 @@ export function setupWebSocket(server) {
             await handleAudioChunk(sessionId, data.audio);
             break;
 
+          case 'video_chunk':
+            await handleVideoChunk(sessionId, data.video);
+            break;
+
           case 'stop_recording':
             await handleStopRecording(sessionId);
             break;
@@ -52,7 +56,7 @@ export function setupWebSocket(server) {
         }
       } catch (error) {
         console.error('Error handling WebSocket message:', error);
-        ws.send(JSON.dumps({
+        ws.send(JSON.stringify({
           type: 'error',
           message: error.message
         }));
@@ -88,14 +92,14 @@ async function handleStartRecording(sessionId, ws) {
     // Start listening for codeword detections from Python
     startListeningForCodeword(sessionId, ws);
 
-    ws.send(JSON.dumps({
+    ws.send(JSON.stringify({
       type: 'recording_started',
       sessionId: sessionId,
       message: 'Recording started - monitoring for panic codeword'
     }));
   } catch (error) {
     console.error('Error starting Python session:', error.message);
-    ws.send(JSON.dumps({
+    ws.send(JSON.stringify({
       type: 'error',
       message: `Failed to start recording: ${error.message}`
     }));
@@ -119,6 +123,26 @@ async function handleAudioChunk(sessionId, audioData) {
     );
   } catch (error) {
     console.error(`Error sending audio for ${sessionId}:`, error.message);
+  }
+}
+
+async function handleVideoChunk(sessionId, videoData) {
+  try {
+    // Convert base64 video to buffer
+    const videoBuffer = Buffer.from(videoData, 'base64');
+
+    // Forward to Python service
+    await axios.post(
+      `${config.PYTHON_SERVICE_URL}/session/${sessionId}/video`,
+      videoBuffer,
+      {
+        headers: {
+          'Content-Type': 'application/octet-stream'
+        }
+      }
+    );
+  } catch (error) {
+    console.error(`Error sending video for ${sessionId}:`, error.message);
   }
 }
 
@@ -154,7 +178,7 @@ router.post('/codeword-detected', async (req, res) => {
 
   if (ws && ws.readyState === 1) {  // 1 = OPEN
     // Notify frontend immediately
-    ws.send(JSON.dumps({
+    ws.send(JSON.stringify({
       type: 'codeword_detected',
       sessionId: session_id,
       phrase: detected_phrase,
@@ -169,7 +193,7 @@ router.post('/codeword-detected', async (req, res) => {
       if (callResult.success) {
         console.log(`✅ Emergency call triggered! Call SID: ${callResult.callSid}`);
 
-        ws.send(JSON.dumps({
+        ws.send(JSON.stringify({
           type: 'call_triggered',
           sessionId: session_id,
           callSid: callResult.callSid,
@@ -210,7 +234,7 @@ router.post('/codeword-detected', async (req, res) => {
         addRequest(request);
       } else {
         console.error(`❌ Failed to trigger call: ${callResult.error}`);
-        ws.send(JSON.dumps({
+        ws.send(JSON.stringify({
           type: 'call_failed',
           sessionId: session_id,
           error: callResult.error
@@ -218,7 +242,7 @@ router.post('/codeword-detected', async (req, res) => {
       }
     } catch (error) {
       console.error('Error triggering call:', error);
-      ws.send(JSON.dumps({
+      ws.send(JSON.stringify({
         type: 'call_failed',
         sessionId: session_id,
         error: error.message
