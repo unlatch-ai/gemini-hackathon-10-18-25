@@ -1,22 +1,27 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { config } from '../config.js';
 
-// Debug: Check if API key is present
-if (!process.env.GEMINI_API_KEY) {
-  console.error('❌ GEMINI_API_KEY is not set in gemini.js!');
-} else {
-  console.log(`🔑 API Key loaded in gemini.js (first 10 chars): ${process.env.GEMINI_API_KEY.substring(0, 10)}...`);
-}
+const genAI = new GoogleGenerativeAI(config.GEMINI_API_KEY);
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+/**
+ * Available Gemini models
+ */
+export const GEMINI_MODELS = {
+  FLASH: 'gemini-2.5-flash',
+  PRO: 'gemini-2.5-pro',
+  FLASH_LITE: 'gemini-2.5-flash-lite',
+};
 
 /**
  * Analyzes a WhatsApp message to extract 311 service request information
  * @param {string} messageText - The incoming message text
+ * @param {string} modelName - The Gemini model to use (optional, defaults to gemini-2.0-flash-exp)
  * @returns {Promise<Object|null>} Analysis result with requestType, location, details, confidence
  */
-export async function analyzeMessageWithGemini(messageText) {
+export async function analyzeMessageWithGemini(messageText, modelName = GEMINI_MODELS.FLASH) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: modelName });
+    console.log(`🤖 Using model: ${modelName}`);
 
     const prompt = `You are an AI assistant helping to parse San Francisco 311 service requests from WhatsApp messages.
 

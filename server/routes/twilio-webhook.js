@@ -2,6 +2,7 @@ import express from 'express';
 import twilio from 'twilio';
 import { analyzeMessageWithGemini } from '../services/gemini.js';
 import { submitTo311 } from '../services/sf311.js';
+import { currentModel } from '../index.js';
 
 const { MessagingResponse } = twilio.twiml;
 const router = express.Router();
@@ -16,8 +17,8 @@ router.post('/webhook', async (req, res) => {
     // Create Twilio response
     const twiml = new MessagingResponse();
 
-    // Analyze the message with Gemini
-    const analysis = await analyzeMessageWithGemini(Body);
+    // Analyze the message with Gemini using the currently selected model
+    const analysis = await analyzeMessageWithGemini(Body, currentModel);
 
     if (!analysis) {
       twiml.message('Sorry, I could not understand your request. Please provide more details about the issue, including the location.');

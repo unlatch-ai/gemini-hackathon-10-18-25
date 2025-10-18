@@ -1,27 +1,14 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { config } from './config.js';
 import twilioWebhook from './routes/twilio-webhook.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Load .env.local from project root (one level up from server/)
-dotenv.config({ path: join(__dirname, '..', '.env.local') });
-
-// Verify API key is loaded
-if (!process.env.GEMINI_API_KEY) {
-  console.error('❌ ERROR: GEMINI_API_KEY not found in environment variables!');
-  console.error('   Please make sure .env.local exists in the project root with GEMINI_API_KEY set.');
-  process.exit(1);
-} else {
-  console.log('✅ GEMINI_API_KEY loaded successfully');
-}
+import { GEMINI_MODELS } from './services/gemini.js';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = config.PORT;
+
+// Store current model selection (in production, use a database)
+export let currentModel = GEMINI_MODELS.FLASH;
 
 // Middleware
 app.use(cors());
@@ -34,6 +21,33 @@ app.use('/twilio', twilioWebhook);
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Get available models
+app.get('/api/models', (req, res) => {
+  res.json({
+    available: Object.entries(GEMINI_MODELS).map(([key, value]) => ({
+      id: value,
+      name: key,
+    })),
+    current: currentModel,
+  });
+});
+
+// Set current model
+app.post('/api/models/select', (req, res) => {
+  const { model } = req.body;
+
+  if (!Object.values(GEMINI_MODELS).includes(model)) {
+    return res.status(400).json({
+      error: 'Invalid model',
+      available: Object.values(GEMINI_MODELS)
+    });
+  }
+
+  currentModel = model;
+  console.log(`🔄 Model changed to: ${model}`);
+  res.json({ success: true, model: currentModel });
 });
 
 app.listen(PORT, () => {

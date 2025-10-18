@@ -5,6 +5,7 @@ import Header from './components/Header';
 import MessageFeed from './components/MessageFeed';
 import RequestStatus from './components/RequestStatus';
 import MessageDetail from './components/MessageDetail';
+import ModelSelector from './components/ModelSelector';
 
 const App: React.FC = () => {
   const [messages] = useState<Message[]>(MOCK_MESSAGES);
@@ -20,15 +21,16 @@ const App: React.FC = () => {
       <Header />
       <main className="p-4 sm:p-6 lg:p-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
-          {/* Column 1: Message Feed */}
-          <div className="lg:col-span-1">
+          {/* Column 1: Message Feed & Model Selector */}
+          <div className="lg:col-span-1 space-y-6">
+            <ModelSelector />
             <MessageFeed
               messages={messages}
               selectedMessage={selectedMessage}
               onSelectMessage={handleSelectMessage}
             />
           </div>
-          
+
           {/* Column 2 & 3: Details & Status */}
           <div className="lg:col-span-2 grid grid-cols-1 gap-6">
             <MessageDetail message={selectedMessage} />
