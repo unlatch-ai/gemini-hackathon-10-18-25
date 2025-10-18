@@ -8,8 +8,10 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState('idle');
   const [recordingTime, setRecordingTime] = useState(0);
-  const [codewordDetected, setCodewordDetected] = useState(false);
+  const [dangerDetected, setDangerDetected] = useState(false);
   const [callTriggered, setCallTriggered] = useState(false);
+  const [transcripts, setTranscripts] = useState<string[]>([]);
+  const [dangerScore, setDangerScore] = useState<number | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -120,8 +122,11 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
             recognition.lang = 'en-US';
 
             recognition.onresult = (event: any) => {
-              const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+              const transcript = event.results[event.results.length - 1][0].transcript.trim();
               console.log('🎙️  Heard:', transcript);
+
+              // Add to transcript display
+              setTranscripts(prev => [...prev.slice(-10), transcript]); // Keep last 10
 
               // Send to backend
               if (ws.readyState === WebSocket.OPEN) {
@@ -164,9 +169,10 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
             break;
 
           case 'codeword_detected':
-            console.log('🚨 CODEWORD DETECTED!', data);
-            setCodewordDetected(true);
-            setStatus('codeword_detected');
+            console.log('🚨 DANGER DETECTED!', data);
+            setDangerDetected(true);
+            setDangerScore(data.confidence ? Math.round(data.confidence * 100) : null);
+            setStatus('danger_detected');
             if (onCodewordDetected) {
               onCodewordDetected();
             }
@@ -249,15 +255,15 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
 
   const getStatusColor = () => {
     if (callTriggered) return 'bg-purple-600';
-    if (codewordDetected) return 'bg-red-600 animate-pulse';
+    if (dangerDetected) return 'bg-red-600 animate-pulse';
     if (isRecording) return 'bg-green-600 animate-pulse';
     return 'bg-gray-600';
   };
 
   const getStatusText = () => {
     if (callTriggered) return '📞 Emergency Call Triggered';
-    if (codewordDetected) return '🚨 Codeword Detected!';
-    if (status === 'recording') return '👂 Monitoring...';
+    if (dangerDetected) return `🚨 Dangerous Situation Detected! (${dangerScore}%)`;
+    if (status === 'recording') return '👂 AI Monitoring Active...';
     if (status === 'connecting') return 'Connecting...';
     if (status === 'connected') return 'Connected';
     if (status === 'error') return '❌ Error';
@@ -309,11 +315,26 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
         </div>
       )}
 
+      {/* Live Transcript Display */}
+      {isRecording && transcripts.length > 0 && (
+        <div className="mb-4 bg-gray-900/50 border border-gray-700 rounded-lg p-4 max-h-32 overflow-y-auto">
+          <p className="text-xs text-gray-400 mb-2">Live Transcript (AI Analysis Every 10s):</p>
+          {transcripts.map((text, idx) => (
+            <p key={idx} className="text-sm text-gray-300 mb-1">
+              • {text}
+            </p>
+          ))}
+        </div>
+      )}
+
       {/* Alert Messages */}
-      {codewordDetected && !callTriggered && (
+      {dangerDetected && !callTriggered && (
         <div className="bg-red-500/20 border border-red-500 rounded-lg p-4 mb-4">
-          <p className="text-red-300 text-center">
-            🚨 Panic codeword detected! Triggering emergency call...
+          <p className="text-red-300 text-center font-semibold">
+            🚨 Dangerous situation detected by AI! (Score: {dangerScore}%)
+          </p>
+          <p className="text-red-200 text-sm text-center mt-1">
+            Triggering emergency call...
           </p>
         </div>
       )}
@@ -364,12 +385,13 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
         </p>
         <ol className="text-sm text-blue-200 mt-2 space-y-1 list-decimal list-inside">
           <li>Click "Start Safety Recording"</li>
-          <li>The AI monitors your audio for the panic codeword</li>
-          <li>If detected, you'll receive an automated phone call</li>
-          <li>Use the call as an excuse to leave the situation</li>
+          <li>Gemini AI analyzes your conversation every 10 seconds</li>
+          <li>If dangerous/uncomfortable situation detected (70%+ confidence)</li>
+          <li>You'll automatically receive a fake phone call</li>
+          <li>Use the call as an excuse to leave safely</li>
         </ol>
         <p className="text-xs text-gray-400 mt-3">
-          Default codeword: "help me mom"
+          Powered by Gemini 2.0 Flash AI
         </p>
       </div>
     </div>
