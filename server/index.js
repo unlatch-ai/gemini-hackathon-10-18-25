@@ -1,12 +1,17 @@
 import express from 'express';
 import cors from 'cors';
+import http from 'http';
 import { config } from './config.js';
 import twilioWebhook from './routes/twilio-webhook.js';
+import liveSessionRoutes, { setupWebSocket } from './routes/live-session.js';
 import { GEMINI_MODELS } from './services/gemini.js';
 import { getMessages, getRequests } from './storage.js';
 
 const app = express();
 const PORT = config.PORT;
+
+// Create HTTP server for WebSocket
+const server = http.createServer(app);
 
 // Store current model selection (in production, use a database)
 export let currentModel = GEMINI_MODELS.FLASH;
@@ -18,6 +23,7 @@ app.use(express.json());
 
 // Routes
 app.use('/twilio', twilioWebhook);
+app.use('/api/live', liveSessionRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -63,7 +69,12 @@ app.post('/api/models/select', (req, res) => {
   res.json({ success: true, model: currentModel });
 });
 
-app.listen(PORT, () => {
+// Setup WebSocket server
+setupWebSocket(server);
+
+server.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📱 Twilio webhook URL: http://localhost:${PORT}/twilio/webhook`);
+  console.log(`🎥 WebSocket URL: ws://localhost:${PORT}/ws/live-session`);
+  console.log(`🔑 Panic codeword: "${config.PANIC_CODEWORD}"`);
 });

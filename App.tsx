@@ -5,7 +5,7 @@ import Header from './components/Header';
 import MessageFeed from './components/MessageFeed';
 import RequestStatus from './components/RequestStatus';
 import MessageDetail from './components/MessageDetail';
-import ModelSelector from './components/ModelSelector';
+import SafetyRecorder from './components/SafetyRecorder';
 
 const API_BASE_URL = 'http://localhost:3001/api';
 
@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [loading, setLoading] = useState(true);
   const [useMockData, setUseMockData] = useState(false);
+  const [showAlert, setShowAlert] = useState(false);
 
   // Fetch data from API
   const fetchData = async () => {
@@ -85,30 +86,35 @@ const App: React.FC = () => {
     );
   }
 
+  const handleCodewordDetected = () => {
+    setShowAlert(true);
+    setTimeout(() => setShowAlert(false), 10000); // Hide after 10 seconds
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 font-sans">
       <Header />
-      {useMockData && (
-        <div className="bg-yellow-500/20 border-b border-yellow-500/50 px-4 py-2 text-center">
-          <p className="text-sm text-yellow-300">
-            📊 Showing mock data - Send a WhatsApp message to see live data!
+      {showAlert && (
+        <div className="bg-red-500/90 border-b border-red-600 px-4 py-3 text-center animate-pulse">
+          <p className="text-lg font-bold text-white">
+            🚨 PANIC CODEWORD DETECTED - EMERGENCY CALL TRIGGERED! 📞
           </p>
         </div>
       )}
       <main className="p-4 sm:p-6 lg:p-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
-          {/* Column 1: Message Feed & Model Selector */}
-          <div className="lg:col-span-1 space-y-6">
-            <ModelSelector />
+          {/* Column 1: Safety Recorder */}
+          <div className="lg:col-span-1">
+            <SafetyRecorder onCodewordDetected={handleCodewordDetected} />
+          </div>
+
+          {/* Column 2 & 3: Message Feed & Status */}
+          <div className="lg:col-span-2 space-y-6">
             <MessageFeed
               messages={messages}
               selectedMessage={selectedMessage}
               onSelectMessage={handleSelectMessage}
             />
-          </div>
-
-          {/* Column 2 & 3: Details & Status */}
-          <div className="lg:col-span-2 grid grid-cols-1 gap-6">
             <MessageDetail message={selectedMessage} />
             <RequestStatus requests={requests} />
           </div>

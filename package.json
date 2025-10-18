@@ -17,7 +17,9 @@
     "twilio": "^5.0.0",
     "@google/generative-ai": "^0.21.0",
     "dotenv": "^16.4.1",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "ws": "^8.16.0",
+    "axios": "^1.6.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
