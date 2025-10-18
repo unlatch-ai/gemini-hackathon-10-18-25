@@ -1,0 +1,5 @@
+{
+  "name": "SF 311 WhatsApp Bot Dashboard",
+  "description": "A dashboard to visualize a conceptual WhatsApp bot powered by Twilio and Gemini for submitting SF 311 service requests. This is a frontend simulation of the backend process.",
+  "requestFramePermissions": []
+}
