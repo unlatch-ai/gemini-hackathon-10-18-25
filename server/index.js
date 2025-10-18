@@ -3,6 +3,7 @@ import cors from 'cors';
 import { config } from './config.js';
 import twilioWebhook from './routes/twilio-webhook.js';
 import { GEMINI_MODELS } from './services/gemini.js';
+import { getMessages, getRequests } from './storage.js';
 
 const app = express();
 const PORT = config.PORT;
@@ -21,6 +22,18 @@ app.use('/twilio', twilioWebhook);
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Get all messages
+app.get('/api/messages', (req, res) => {
+  const messages = getMessages();
+  res.json(messages);
+});
+
+// Get all requests
+app.get('/api/requests', (req, res) => {
+  const requests = getRequests();
+  res.json(requests);
 });
 
 // Get available models

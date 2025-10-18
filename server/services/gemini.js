@@ -29,7 +29,7 @@ Analyze the following message and extract:
 1. Request Type (e.g., "Abandoned Vehicle", "Pothole or Street Defect", "Graffiti", "Streetlight Repair", "Illegal Dumping", "Damaged Street Sign", etc.)
 2. Location (full address or intersection in San Francisco)
 3. Details (vehicle info, description of damage, etc.)
-4. Confidence (0-1 scale, how confident you are this is a valid 311 request)
+4. Confidence (0-1 scale with two decimal places from 0.00 to 1.00, how confident you are this is a valid 311 request)
 
 Common SF 311 Request Types:
 - Abandoned Vehicle
@@ -50,7 +50,7 @@ Respond ONLY with valid JSON in this exact format:
   "requestType": "request type here",
   "location": "full location in San Francisco",
   "details": "extracted details",
-  "confidence": 0.95
+  "confidence": 0.XX // 0.00 to 1.00 with two decimal places
 }
 
 If this doesn't appear to be a 311 service request, return confidence below 0.7 and make your best guess.`;

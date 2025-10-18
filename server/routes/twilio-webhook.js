@@ -3,6 +3,7 @@ import twilio from 'twilio';
 import { analyzeMessageWithGemini } from '../services/gemini.js';
 import { submitTo311 } from '../services/sf311.js';
 import { currentModel } from '../index.js';
+import { addMessage, addRequest } from '../storage.js';
 
 const { MessagingResponse } = twilio.twiml;
 const router = express.Router();
@@ -37,10 +38,17 @@ router.post('/webhook', async (req, res) => {
     }
 
     // Submit to SF 311
+    let result;
+    let requestStatus = 'Pending';
+    let sf311CaseId = undefined;
+
     try {
-      const result = await submitTo311(analysis, From, MessageSid);
+      result = await submitTo311(analysis, From, MessageSid);
 
       if (result.success) {
+        requestStatus = 'Submitted';
+        sf311CaseId = result.caseId;
+
         twiml.message(
           `✅ Your ${analysis.requestType} report has been submitted to SF 311!\n\n` +
           `📍 Location: ${analysis.location}\n` +
@@ -48,6 +56,8 @@ router.post('/webhook', async (req, res) => {
           `You can track your request at: ${result.trackingUrl || 'https://www.sf.gov/check-status-311-request'}`
         );
       } else {
+        requestStatus = 'Failed';
+
         twiml.message(
           `⚠️ I understood your request but couldn't submit it automatically.\n\n` +
           `📍 ${analysis.requestType} at ${analysis.location}\n\n` +
@@ -57,6 +67,8 @@ router.post('/webhook', async (req, res) => {
       }
     } catch (submitError) {
       console.error('❌ Error submitting to 311:', submitError);
+      requestStatus = 'Failed';
+
       twiml.message(
         `⚠️ I understood your request:\n\n` +
         `📍 ${analysis.requestType} at ${analysis.location}\n\n` +
@@ -64,6 +76,30 @@ router.post('/webhook', async (req, res) => {
         `https://www.sf.gov/topics/311-online-services`
       );
     }
+
+    // Store the message and request in memory
+    const message = {
+      id: MessageSid,
+      from: From,
+      timestamp: new Date().toISOString(),
+      text: Body,
+      analysis: analysis,
+      automationLog: result?.automationLog || []
+    };
+
+    const request = {
+      id: `req_${Date.now()}`,
+      messageId: MessageSid,
+      requestType: analysis.requestType,
+      status: requestStatus,
+      submittedAt: new Date().toISOString(),
+      sf311CaseId: sf311CaseId
+    };
+
+    addMessage(message);
+    addRequest(request);
+
+    console.log('💾 Stored message and request in memory');
 
     res.type('text/xml').send(twiml.toString());
 
