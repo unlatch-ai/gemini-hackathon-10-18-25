@@ -20,9 +20,11 @@ npm install
 ### Python Dependencies
 ```bash
 cd python
-pip install -r requirements.txt
+./setup.sh
 cd ..
 ```
+
+This will create a virtual environment and install all required Python packages.
 
 ## Step 2: Configure Environment
 
@@ -66,6 +68,7 @@ You'll need **3 terminal windows**:
 ### Terminal 1: Python Service
 ```bash
 cd python
+source venv/bin/activate
 python live_stream_handler.py
 ```
 
@@ -73,6 +76,7 @@ You should see:
 ```
 🚀 Starting Gemini Live Stream Handler
 📝 Monitoring for codeword: 'help me mom'
+======== Running on http://127.0.0.1:5000 ========
 ```
 
 ### Terminal 2: Node.js Backend
@@ -166,9 +170,9 @@ VITE v6.2.0  ready in XXX ms
 
 ```bash
 # Start everything (requires 3 terminals)
-cd python && python live_stream_handler.py   # Terminal 1
-npm run server                               # Terminal 2
-npm run dev                                  # Terminal 3
+cd python && source venv/bin/activate && python live_stream_handler.py   # Terminal 1
+npm run server                                                            # Terminal 2
+npm run dev                                                               # Terminal 3
 
 # Check service health
 curl http://localhost:5000/health  # Python service
