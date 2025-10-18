@@ -16,6 +16,7 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     return () => {
@@ -39,9 +40,10 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
     try {
       setStatus('connecting');
 
-      // Connect to WebSocket (works with ngrok)
+      // Connect to WebSocket (works with ngrok via Vite proxy)
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = import.meta.env.VITE_WS_URL || `${protocol}//${window.location.hostname}:3001/ws/live-session`;
+      const host = window.location.host; // includes port
+      const wsUrl = import.meta.env.VITE_WS_URL || `${protocol}//${host}/ws/live-session`;
 
       console.log('Connecting to WebSocket:', wsUrl);
       const ws = new WebSocket(wsUrl);
@@ -74,12 +76,14 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
             videoRef.current.srcObject = stream;
           }
 
-          const mediaRecorder = new MediaRecorder(stream, {
-            mimeType: 'video/webm;codecs=vp8,opus'
+          // Create audio-only MediaRecorder for Gemini (simpler than extracting from video)
+          const audioStream = new MediaStream(stream.getAudioTracks());
+          const mediaRecorder = new MediaRecorder(audioStream, {
+            mimeType: 'audio/webm;codecs=opus'
           });
           mediaRecorderRef.current = mediaRecorder;
 
-          // Send video chunks to backend
+          // Send audio chunks to backend
           mediaRecorder.ondataavailable = async (event) => {
             if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
               // Convert to base64
@@ -87,8 +91,8 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
               reader.onloadend = () => {
                 const base64 = (reader.result as string).split(',')[1];
                 ws.send(JSON.stringify({
-                  type: 'video_chunk',
-                  video: base64
+                  type: 'audio_chunk',
+                  audio: base64
                 }));
               };
               reader.readAsDataURL(event.data);
@@ -106,6 +110,38 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
 
           // Send start recording message
           ws.send(JSON.stringify({ type: 'start_recording' }));
+
+          // Start Web Speech API for continuous speech recognition
+          if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+            const recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event: any) => {
+              const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+              console.log('🎙️  Heard:', transcript);
+
+              // Send to backend
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                  type: 'trigger_codeword',
+                  text: transcript
+                }));
+              }
+            };
+
+            recognition.onerror = (event: any) => {
+              console.error('Speech recognition error:', event.error);
+            };
+
+            recognition.start();
+            recognitionRef.current = recognition;
+            console.log('✅ Speech recognition started');
+          } else {
+            console.warn('Speech recognition not supported - use button instead');
+          }
 
         } catch (error) {
           console.error('Error accessing camera/microphone:', error);
@@ -177,6 +213,11 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
     }
 
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'stop_recording' }));
       wsRef.current.close();
@@ -188,6 +229,16 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
 
     setIsRecording(false);
     setStatus('stopped');
+  };
+
+  const triggerCodeword = async () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log('🚨 Manually triggering codeword...');
+      wsRef.current.send(JSON.stringify({
+        type: 'trigger_codeword',
+        text: 'so help me god'
+      }));
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -289,12 +340,20 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
             {status === 'connecting' ? 'Connecting...' : '🎙️ Start Safety Recording'}
           </button>
         ) : (
-          <button
-            onClick={stopRecording}
-            className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-6 rounded-lg transition-colors text-lg"
-          >
-            ⏹️ Stop Recording
-          </button>
+          <>
+            <button
+              onClick={triggerCodeword}
+              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-4 px-6 rounded-lg transition-colors text-lg"
+            >
+              🚨 Test Codeword Detection
+            </button>
+            <button
+              onClick={stopRecording}
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-6 rounded-lg transition-colors text-lg"
+            >
+              ⏹️ Stop Recording
+            </button>
+          </>
         )}
       </div>
 

@@ -8,6 +8,23 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        allowedHosts: [
+          '.ngrok.io',
+          '.ngrok-free.app',
+          '.ngrok-free.dev',
+          'localhost'
+        ],
+        proxy: {
+          '/ws': {
+            target: 'ws://localhost:3001',
+            ws: true,
+            changeOrigin: true,
+          },
+          '/api': {
+            target: 'http://localhost:3001',
+            changeOrigin: true,
+          }
+        },
       },
       plugins: [react()],
       define: {

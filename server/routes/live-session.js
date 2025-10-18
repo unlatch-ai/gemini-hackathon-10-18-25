@@ -47,6 +47,10 @@ export function setupWebSocket(server) {
             await handleVideoChunk(sessionId, data.video);
             break;
 
+          case 'trigger_codeword':
+            await handleTriggerCodeword(sessionId, data.text);
+            break;
+
           case 'stop_recording':
             await handleStopRecording(sessionId);
             break;
@@ -128,10 +132,12 @@ async function handleAudioChunk(sessionId, audioData) {
 
 async function handleVideoChunk(sessionId, videoData) {
   try {
-    // Convert base64 video to buffer
+    // For MVP: Extract audio from video chunk and send to Gemini
+    // The video/webm container includes audio - we'll send it as-is
+    // and let the Python service extract the audio track
     const videoBuffer = Buffer.from(videoData, 'base64');
 
-    // Forward to Python service
+    // Send to Python service (will extract audio and send to Gemini)
     await axios.post(
       `${config.PYTHON_SERVICE_URL}/session/${sessionId}/video`,
       videoBuffer,
@@ -143,6 +149,26 @@ async function handleVideoChunk(sessionId, videoData) {
     );
   } catch (error) {
     console.error(`Error sending video for ${sessionId}:`, error.message);
+  }
+}
+
+async function handleTriggerCodeword(sessionId, text) {
+  console.log(`🚨 Manual codeword trigger for ${sessionId}: "${text}"`);
+
+  try {
+    // Send text to Python service
+    await axios.post(
+      `${config.PYTHON_SERVICE_URL}/session/${sessionId}/text`,
+      { text },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    console.log(`✅ Text sent to Gemini`);
+  } catch (error) {
+    console.error(`Error sending text for ${sessionId}:`, error.message);
   }
 }
 
