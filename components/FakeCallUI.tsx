@@ -86,17 +86,36 @@ const FakeCallUI: React.FC<FakeCallUIProps> = ({ onAccept, onDecline, persona = 
     // Start ringtone after a small delay to ensure ref is attached
     const playRingtone = () => {
       if (ringtoneRef.current) {
-        console.log('   Ringtone element found, calling play()');
-        ringtoneRef.current.play().catch(error => {
-          console.error('❌ Error playing ringtone:', error);
-        });
+        console.log('   Ringtone element found, attempting to play...');
+        console.log('   Ringtone src:', ringtoneRef.current.src);
+        console.log('   Ringtone readyState:', ringtoneRef.current.readyState);
+
+        // Set volume to ensure it's audible
+        ringtoneRef.current.volume = 0.8;
+
+        const playPromise = ringtoneRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log('✅ Ringtone playing successfully!');
+            })
+            .catch(error => {
+              console.error('❌ Error playing ringtone:', error);
+              console.error('   Error name:', error.name);
+              console.error('   Error message:', error.message);
+              // If autoplay is blocked, we'll need user interaction
+              if (error.name === 'NotAllowedError') {
+                console.warn('⚠️ Autoplay blocked by browser - ringtone will play after user clicks Accept');
+              }
+            });
+        }
       } else {
         console.error('❌ Ringtone ref is null!');
       }
     };
 
     // Delay ringtone slightly to ensure DOM is ready
-    const ringtoneTimeout = setTimeout(playRingtone, 100);
+    const ringtoneTimeout = setTimeout(playRingtone, 200);
 
     // Preload greeting audio in background
     const preloadGreeting = async () => {
@@ -355,10 +374,11 @@ const FakeCallUI: React.FC<FakeCallUIProps> = ({ onAccept, onDecline, persona = 
 
   const handleAccept = () => {
     console.log('📞📞📞 ACCEPT BUTTON CLICKED!');
-    console.log('   Pausing ringtone...');
+    console.log('   Stopping ringtone...');
     if (ringtoneRef.current) {
       ringtoneRef.current.pause();
-      console.log('   ✅ Ringtone paused');
+      ringtoneRef.current.currentTime = 0;
+      console.log('   ✅ Ringtone stopped');
     } else {
       console.warn('   ⚠️ Ringtone ref is null');
     }
