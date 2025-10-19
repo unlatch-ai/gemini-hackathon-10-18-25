@@ -3,7 +3,6 @@ import { WebSocketServer } from 'ws';
 import axios from 'axios';
 import { config } from '../config.js';
 import twilioCaller from '../services/twilio-caller.js';
-import { addMessage, addRequest } from '../storage.js';
 
 const router = express.Router();
 
@@ -191,16 +190,42 @@ function startListeningForCodeword(sessionId, ws) {
   console.log(`👂 Listening for codeword in session ${sessionId}`);
 }
 
-// Webhook endpoint for Python to notify when codeword is detected
+// Webhook endpoint for Python to notify about analysis events
 router.post('/codeword-detected', async (req, res) => {
-  const { session_id, detected_phrase, confidence, timestamp } = req.body;
-
-  console.log(`🚨 CODEWORD DETECTED! Session: ${session_id}`);
-  console.log(`   Phrase: "${detected_phrase}"`);
-  console.log(`   Confidence: ${confidence}`);
+  const { type, session_id, detected_phrase, confidence, timestamp, danger_score, agent_scores } = req.body;
 
   // Get the WebSocket connection for this session
   const ws = activeConnections.get(session_id);
+
+  if (!ws || ws.readyState !== 1) {
+    return res.status(404).json({ error: 'WebSocket not found or not open' });
+  }
+
+  // Handle different event types
+  if (type === 'analysis_started') {
+    console.log(`🤖 Analysis started for session ${session_id}`);
+    ws.send(JSON.stringify({
+      type: 'analysis_started',
+      sessionId: session_id
+    }));
+    return res.json({ status: 'notified' });
+  }
+
+  if (type === 'analysis_complete') {
+    console.log(`📊 Analysis complete for session ${session_id}: ${danger_score}/100`);
+    ws.send(JSON.stringify({
+      type: 'analysis_complete',
+      sessionId: session_id,
+      dangerScore: danger_score,
+      agentScores: agent_scores
+    }));
+    return res.json({ status: 'notified' });
+  }
+
+  // Original codeword detection (danger ≥70%)
+  console.log(`🚨 CODEWORD DETECTED! Session: ${session_id}`);
+  console.log(`   Phrase: "${detected_phrase}"`);
+  console.log(`   Confidence: ${confidence}`);
 
   if (ws && ws.readyState === 1) {  // 1 = OPEN
     // Notify frontend immediately
@@ -209,7 +234,8 @@ router.post('/codeword-detected', async (req, res) => {
       sessionId: session_id,
       phrase: detected_phrase,
       confidence: confidence,
-      timestamp: timestamp || new Date().toISOString()
+      timestamp: timestamp || new Date().toISOString(),
+      agentScores: agent_scores  // Include agent breakdown
     }));
 
     // Trigger Twilio call
@@ -226,38 +252,14 @@ router.post('/codeword-detected', async (req, res) => {
           scenario: callResult.scenario
         }));
 
-        // Store the event
-        const message = {
-          id: session_id,
-          from: 'safety_system',
-          timestamp: new Date().toISOString(),
-          text: `Panic codeword detected: "${detected_phrase}"`,
-          analysis: {
-            requestType: 'Safety Alert',
-            location: 'Unknown',
-            details: `Codeword "${detected_phrase}" triggered emergency call`,
-            confidence: confidence
-          },
-          automationLog: [
-            `[${timestamp}] Codeword detected: "${detected_phrase}"`,
-            `[${timestamp}] Confidence: ${confidence}`,
-            `[${timestamp}] Triggering emergency call...`,
-            `[${timestamp}] Call initiated: ${callResult.callSid}`
-          ]
-        };
-
-        addMessage(message);
-
-        const request = {
-          id: `req_${Date.now()}`,
-          messageId: session_id,
-          requestType: 'Emergency Call Triggered',
-          status: 'Submitted',
-          submittedAt: new Date().toISOString(),
-          sf311CaseId: callResult.callSid
-        };
-
-        addRequest(request);
+        // Log the emergency event (in production, save to database)
+        console.log(`📋 Emergency Response Log:
+          Session: ${session_id}
+          Detected: "${detected_phrase}"
+          Confidence: ${Math.round(confidence * 100)}%
+          Call SID: ${callResult.callSid}
+          Timestamp: ${timestamp}
+        `);
       } else {
         console.error(`❌ Failed to trigger call: ${callResult.error}`);
         ws.send(JSON.stringify({

@@ -15,7 +15,10 @@ import subprocess
 import tempfile
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(levelname)s:%(name)s:%(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -212,10 +215,24 @@ Only trigger if you are 100% certain the user said this exact phrase."""
             # Clear buffer
             self.transcript_buffers[session_id] = []
 
-            # Analyze with Gemini
+            # Notify frontend that analysis is starting
+            await self.notify_backend(session_id, {
+                'type': 'analysis_started',
+                'session_id': session_id
+            })
+
+            # Analyze with Gemini multi-agent system
             try:
-                danger_score = await self._analyze_conversation_safety(conversation)
-                logger.info(f"📊 Danger score: {danger_score}/100")
+                danger_score, agent_scores = await self._analyze_conversation_safety(conversation)
+                logger.info(f"📊 Final danger score: {danger_score}/100")
+
+                # Always send agent scores back to frontend (even if not dangerous)
+                await self.notify_backend(session_id, {
+                    'type': 'analysis_complete',
+                    'session_id': session_id,
+                    'danger_score': danger_score,
+                    'agent_scores': agent_scores
+                })
 
                 if danger_score >= 70:  # Threshold: 70%
                     logger.warning(f"🚨 DANGEROUS SITUATION DETECTED! Score: {danger_score}")
@@ -223,44 +240,244 @@ Only trigger if you are 100% certain the user said this exact phrase."""
                         'session_id': session_id,
                         'detected_phrase': conversation[:100],  # First 100 chars
                         'confidence': danger_score / 100,
-                        'timestamp': ''
+                        'timestamp': '',
+                        'agentScores': agent_scores  # Include multi-agent breakdown
                     })
             except Exception as e:
                 logger.error(f"Error analyzing conversation: {e}")
 
     async def _analyze_conversation_safety(self, conversation):
-        """Use Gemini to analyze if conversation indicates danger/discomfort"""
-        prompt = f"""You are a safety assistant analyzing a conversation fragment.
+        """
+        Multi-agent collaborative analysis system
+        Multiple specialized Gemini agents work together to assess danger level
+        """
+        logger.info("🤝 Starting multi-agent collaborative analysis...")
+
+        # Run all agents in parallel for efficiency
+        results = await asyncio.gather(
+            self._agent_transcript_analyzer(conversation),
+            self._agent_emotional_detector(conversation),
+            self._agent_context_interpreter(conversation),
+            return_exceptions=True
+        )
+
+        # Extract scores from each agent
+        transcript_score, emotional_score, context_score = results
+
+        # Handle any errors
+        if isinstance(transcript_score, Exception):
+            logger.error(f"Transcript analyzer error: {transcript_score}")
+            transcript_score = 0
+        if isinstance(emotional_score, Exception):
+            logger.error(f"Emotional detector error: {emotional_score}")
+            emotional_score = 0
+        if isinstance(context_score, Exception):
+            logger.error(f"Context interpreter error: {context_score}")
+            context_score = 0
+
+        logger.info(f"📊 Agent Scores - Transcript: {transcript_score}, Emotional: {emotional_score}, Context: {context_score}")
+
+        # Threat Assessor Agent: Synthesizes all agent inputs
+        final_score = await self._agent_threat_assessor(
+            conversation,
+            transcript_score,
+            emotional_score,
+            context_score
+        )
+
+        logger.info(f"🎯 Final Threat Assessment: {final_score}/100")
+
+        # Return both final score and individual agent scores for frontend display
+        agent_breakdown = {
+            'transcript': transcript_score,
+            'emotional': emotional_score,
+            'context': context_score,
+            'final': final_score
+        }
+        return final_score, agent_breakdown
+
+    async def _agent_transcript_analyzer(self, conversation):
+        """
+        Agent 1: Transcript Analyzer
+        Analyzes literal content and keywords for concerning language
+        """
+        prompt = f"""You are a TRANSCRIPT ANALYSIS AGENT. Your job is to analyze the literal words spoken.
 
 Conversation: "{conversation}"
 
-Analyze if this conversation indicates the person might be:
-- In an uncomfortable or dangerous situation
-- Being pressured, harassed, or threatened
-- Wanting to leave but unable to express it directly
-- Using coded language to signal distress
+Analyze ONLY the literal content:
+- Explicit threats or aggressive language
+- Direct requests for help
+- Mentions of danger, fear, or discomfort
+- Attempts to leave or end the conversation
 
-Rate the danger level from 0-100:
-- 0-30: Normal, safe conversation
-- 31-60: Slightly concerning but probably fine
-- 61-80: Concerning, person may be uncomfortable
-- 81-100: High danger, person needs help immediately
+Rate danger based on LITERAL CONTENT ONLY from 0-100.
 
-Respond with ONLY a number from 0-100. No explanation, just the number."""
+IMPORTANT: Respond with ONLY a single number between 0 and 100. No explanation, no text, just the number.
+Examples: "0" or "45" or "88"
+
+Your response:"""
 
         try:
             response = self.client.models.generate_content(
-                model='gemini-2.0-flash-exp',
+                model='gemini-2.5-flash',
                 contents=prompt
             )
+            response_text = response.text.strip()
+            logger.debug(f"  📝 Transcript Agent raw response: '{response_text}'")
 
-            # Extract number from response
-            score_text = response.text.strip()
-            score = int(score_text)
-            return min(100, max(0, score))  # Clamp between 0-100
+            # Extract number from response (handle cases like "Score: 75" or just "75")
+            import re
+            numbers = re.findall(r'\d+', response_text)
+            if numbers:
+                score = int(numbers[0])
+            else:
+                logger.warning(f"  📝 Transcript Agent: No number found in '{response_text}', defaulting to 0")
+                score = 0
+
+            logger.info(f"  📝 Transcript Agent: {score}/100")
+            return min(100, max(0, score))
         except Exception as e:
-            logger.error(f"Gemini analysis error: {e}")
-            return 0  # Default to safe if error
+            logger.error(f"Transcript agent error: {e}")
+            raise
+
+    async def _agent_emotional_detector(self, conversation):
+        """
+        Agent 2: Emotional State Detector
+        Detects emotional distress, fear, anxiety through language patterns
+        """
+        prompt = f"""You are an EMOTIONAL ANALYSIS AGENT. Your job is to detect emotional state through language.
+
+Conversation: "{conversation}"
+
+Analyze ONLY emotional indicators:
+- Signs of stress, fear, or anxiety
+- Nervousness or hesitation in speech
+- Passive-aggressive or coded language
+- Emotional distress signals
+
+Rate danger based on EMOTIONAL STATE from 0-100.
+
+IMPORTANT: Respond with ONLY a single number between 0 and 100. No explanation, no text, just the number.
+Examples: "0" or "45" or "88"
+
+Your response:"""
+
+        try:
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            response_text = response.text.strip()
+            logger.debug(f"  😰 Emotional Agent raw response: '{response_text}'")
+
+            import re
+            numbers = re.findall(r'\d+', response_text)
+            if numbers:
+                score = int(numbers[0])
+            else:
+                logger.warning(f"  😰 Emotional Agent: No number found in '{response_text}', defaulting to 0")
+                score = 0
+
+            logger.info(f"  😰 Emotional Agent: {score}/100")
+            return min(100, max(0, score))
+        except Exception as e:
+            logger.error(f"Emotional agent error: {e}")
+            raise
+
+    async def _agent_context_interpreter(self, conversation):
+        """
+        Agent 3: Context Interpreter
+        Understands social dynamics, power imbalances, situational context
+        """
+        prompt = f"""You are a CONTEXT ANALYSIS AGENT. Your job is to understand social dynamics and situational context.
+
+Conversation: "{conversation}"
+
+Analyze ONLY contextual factors:
+- Power dynamics between speakers
+- Signs of coercion or manipulation
+- Social pressure or uncomfortable situations
+- Situational red flags
+
+Rate danger based on CONTEXTUAL ANALYSIS from 0-100.
+
+IMPORTANT: Respond with ONLY a single number between 0 and 100. No explanation, no text, just the number.
+Examples: "0" or "45" or "88"
+
+Your response:"""
+
+        try:
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            response_text = response.text.strip()
+            logger.debug(f"  🔍 Context Agent raw response: '{response_text}'")
+
+            import re
+            numbers = re.findall(r'\d+', response_text)
+            if numbers:
+                score = int(numbers[0])
+            else:
+                logger.warning(f"  🔍 Context Agent: No number found in '{response_text}', defaulting to 0")
+                score = 0
+
+            logger.info(f"  🔍 Context Agent: {score}/100")
+            return min(100, max(0, score))
+        except Exception as e:
+            logger.error(f"Context agent error: {e}")
+            raise
+
+    async def _agent_threat_assessor(self, conversation, transcript_score, emotional_score, context_score):
+        """
+        Agent 4: Threat Assessor
+        Meta-agent that synthesizes inputs from other agents to make final decision
+        """
+        prompt = f"""You are the THREAT ASSESSMENT COORDINATOR. You synthesize analysis from specialist agents.
+
+Conversation: "{conversation}"
+
+Specialist Agent Reports:
+- Transcript Analysis Agent: {transcript_score}/100 (literal content)
+- Emotional State Agent: {emotional_score}/100 (emotional distress)
+- Context Analysis Agent: {context_score}/100 (situational factors)
+
+Your job: Synthesize these three perspectives into a final threat assessment.
+Consider:
+- Are all agents in agreement? (high confidence)
+- Is one agent detecting something others missed?
+- What's the overall pattern across all dimensions?
+
+Provide final danger score 0-100.
+
+IMPORTANT: Respond with ONLY a single number between 0 and 100. No explanation, no text, just the number.
+Examples: "0" or "45" or "88"
+
+Your response:"""
+
+        try:
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            response_text = response.text.strip()
+            logger.debug(f"  ⚖️  Threat Assessor raw response: '{response_text}'")
+
+            import re
+            numbers = re.findall(r'\d+', response_text)
+            if numbers:
+                score = int(numbers[0])
+            else:
+                logger.warning(f"  ⚖️  Threat Assessor: No number found in '{response_text}', defaulting to average")
+                score = int((transcript_score + emotional_score + context_score) / 3)
+
+            logger.info(f"  ⚖️  Threat Assessor (Meta-Agent): {score}/100")
+            return min(100, max(0, score))
+        except Exception as e:
+            logger.error(f"Threat assessor error: {e}")
+            # Fallback: average of available agent scores
+            return int((transcript_score + emotional_score + context_score) / 3)
 
     async def send_video(self, session_id, video_data):
         """Send audio from WebM container to Gemini session"""

@@ -4,6 +4,13 @@ interface SafetyRecorderProps {
   onCodewordDetected?: () => void;
 }
 
+interface AgentScores {
+  transcript: number;
+  emotional: number;
+  context: number;
+  final: number;
+}
+
 const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState('idle');
@@ -12,6 +19,8 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
   const [callTriggered, setCallTriggered] = useState(false);
   const [transcripts, setTranscripts] = useState<string[]>([]);
   const [dangerScore, setDangerScore] = useState<number | null>(null);
+  const [agentScores, setAgentScores] = useState<AgentScores | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -168,10 +177,32 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
             console.log('✅ Recording started on server');
             break;
 
+          case 'analysis_started':
+            console.log('🤖 Multi-agent analysis started...');
+            setAnalyzing(true);
+            break;
+
+          case 'analysis_complete':
+            console.log('📊 Multi-agent analysis complete:', data);
+            setAnalyzing(false);
+            if (data.agentScores) {
+              setAgentScores(data.agentScores);
+            }
+            // Don't set danger detected unless score >= 70
+            if (data.dangerScore < 70) {
+              setDangerDetected(false);
+            }
+            break;
+
           case 'codeword_detected':
             console.log('🚨 DANGER DETECTED!', data);
+            setAnalyzing(false);
             setDangerDetected(true);
             setDangerScore(data.confidence ? Math.round(data.confidence * 100) : null);
+            // Extract agent scores if available
+            if (data.agentScores) {
+              setAgentScores(data.agentScores);
+            }
             setStatus('danger_detected');
             if (onCodewordDetected) {
               onCodewordDetected();
@@ -237,12 +268,12 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
     setStatus('stopped');
   };
 
-  const triggerCodeword = async () => {
+  const testDangerPhrase = async () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('🚨 Manually triggering codeword...');
+      console.log('🧪 Testing multi-agent danger detection...');
       wsRef.current.send(JSON.stringify({
         type: 'trigger_codeword',
-        text: 'so help me god'
+        text: "I'm feeling really unsafe and uncomfortable right now. I want to leave but I can't."
       }));
     }
   };
@@ -318,12 +349,53 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
       {/* Live Transcript Display */}
       {isRecording && transcripts.length > 0 && (
         <div className="mb-4 bg-gray-900/50 border border-gray-700 rounded-lg p-4 max-h-32 overflow-y-auto">
-          <p className="text-xs text-gray-400 mb-2">Live Transcript (AI Analysis Every 10s):</p>
+          <p className="text-xs text-gray-400 mb-2">Live Transcript (Multi-Agent AI Analysis Every 10s):</p>
           {transcripts.map((text, idx) => (
             <p key={idx} className="text-sm text-gray-300 mb-1">
               • {text}
             </p>
           ))}
+        </div>
+      )}
+
+      {/* Analyzing Indicator */}
+      {analyzing && (
+        <div className="mb-4 bg-blue-900/30 border border-blue-500 rounded-lg p-4 animate-pulse">
+          <p className="text-center text-blue-300 font-semibold">
+            🤖 4 Gemini Agents Analyzing...
+          </p>
+          <p className="text-center text-xs text-blue-400 mt-1">
+            Transcript • Emotional • Context • Threat Assessment
+          </p>
+        </div>
+      )}
+
+      {/* Multi-Agent Analysis Display */}
+      {agentScores && !analyzing && (
+        <div className="mb-4 bg-gray-900/50 border border-blue-500 rounded-lg p-4">
+          <p className="text-sm text-blue-300 font-semibold mb-3">🤝 Multi-Agent Analysis Results:</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-800 p-3 rounded">
+              <div className="text-xs text-gray-400">📝 Transcript Agent</div>
+              <div className="text-lg font-bold text-white">{agentScores.transcript}%</div>
+              <div className="text-xs text-gray-500">Literal content analysis</div>
+            </div>
+            <div className="bg-gray-800 p-3 rounded">
+              <div className="text-xs text-gray-400">😰 Emotional Agent</div>
+              <div className="text-lg font-bold text-white">{agentScores.emotional}%</div>
+              <div className="text-xs text-gray-500">Emotional distress detection</div>
+            </div>
+            <div className="bg-gray-800 p-3 rounded">
+              <div className="text-xs text-gray-400">🔍 Context Agent</div>
+              <div className="text-lg font-bold text-white">{agentScores.context}%</div>
+              <div className="text-xs text-gray-500">Situational dynamics</div>
+            </div>
+            <div className="bg-gradient-to-br from-red-900 to-orange-900 p-3 rounded border-2 border-red-500">
+              <div className="text-xs text-gray-200">⚖️  Threat Assessor</div>
+              <div className="text-2xl font-bold text-white">{agentScores.final}%</div>
+              <div className="text-xs text-gray-300">Final consensus score</div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -363,10 +435,10 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
         ) : (
           <>
             <button
-              onClick={triggerCodeword}
+              onClick={testDangerPhrase}
               className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-4 px-6 rounded-lg transition-colors text-lg"
             >
-              🚨 Test Codeword Detection
+              🧪 Test Multi-Agent Detection
             </button>
             <button
               onClick={stopRecording}
@@ -385,13 +457,13 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
         </p>
         <ol className="text-sm text-blue-200 mt-2 space-y-1 list-decimal list-inside">
           <li>Click "Start Safety Recording"</li>
-          <li>Gemini AI analyzes your conversation every 10 seconds</li>
+          <li>4 specialized Gemini AI agents analyze your conversation every 10 seconds</li>
           <li>If dangerous/uncomfortable situation detected (70%+ confidence)</li>
           <li>You'll automatically receive a fake phone call</li>
           <li>Use the call as an excuse to leave safely</li>
         </ol>
         <p className="text-xs text-gray-400 mt-3">
-          Powered by Gemini 2.0 Flash AI
+          Powered by Gemini 2.0 Flash Multi-Agent System
         </p>
       </div>
     </div>
