@@ -1,66 +1,48 @@
 #!/bin/bash
 
-# Start all services for Live Safety Monitor
-# This script starts Python, Node.js, and Frontend in separate processes
+# Guardian Agent - Start All Services
+# Run this script to start frontend, backend, and Python service
 
-echo "🚀 Starting Live Safety Monitor..."
+echo "🚀 Starting Guardian Agent Services..."
 echo ""
 
-# Check if .env.local exists
-if [ ! -f .env.local ]; then
-    echo "❌ Error: .env.local not found"
-    echo "Please copy .env.local.example to .env.local and configure it"
-    exit 1
-fi
-
-# Check if Python virtual environment exists
-if [ ! -d python/venv ]; then
-    echo "❌ Error: Python virtual environment not found"
-    echo "Please run: cd python && ./setup.sh"
-    exit 1
-fi
-
-# Start Python service
-echo "📦 Starting Python service..."
-cd python
-source venv/bin/activate
-python live_stream_handler.py &
-PYTHON_PID=$!
-cd ..
-
+# Kill existing processes
+echo "🧹 Cleaning up old processes..."
+lsof -ti:3000 | xargs kill -9 2>/dev/null
+lsof -ti:3001 | xargs kill -9 2>/dev/null
+lsof -ti:5001 | xargs kill -9 2>/dev/null
 sleep 2
 
-# Start Node.js backend
-echo "🔧 Starting Node.js backend..."
-npm run server &
-NODE_PID=$!
+# Start Frontend (Vite on port 3000)
+echo "📱 Starting Frontend (Vite on port 3000)..."
+npm run dev > /tmp/frontend.log 2>&1 &
+sleep 3
 
-sleep 2
+# Start Backend (Node.js on port 3001)
+echo "🖥️  Starting Backend (Node.js on port 3001)..."
+npm run server > /tmp/node-server.log 2>&1 &
+sleep 3
 
-# Start frontend
-echo "⚛️  Starting Frontend..."
-npm run dev &
-VITE_PID=$!
+# Start Python Service (port 5001)
+echo "🐍 Starting Python Service (port 5001)..."
+python3 python/live_stream_handler.py > /tmp/python-service.log 2>&1 &
+sleep 3
 
 echo ""
 echo "✅ All services started!"
 echo ""
-echo "📝 Process IDs:"
-echo "   Python:  $PYTHON_PID"
-echo "   Node.js: $NODE_PID"
-echo "   Vite:    $VITE_PID"
+echo "📊 Service Status:"
+echo "  Frontend:  http://localhost:3000"
+echo "  Backend:   http://localhost:3001"
+echo "  Python:    http://localhost:5001"
 echo ""
-echo "🌐 Access the app at: http://localhost:3000"
+echo "🌐 Access via ngrok:"
+echo "  Desktop:   https://lilianna-sweltering-kristopher.ngrok-free.dev/desktop"
+echo "  Mobile:    https://lilianna-sweltering-kristopher.ngrok-free.dev/mobile"
 echo ""
-echo "🛑 To stop all services, run:"
-echo "   kill $PYTHON_PID $NODE_PID $VITE_PID"
+echo "📝 Logs:"
+echo "  Frontend:  tail -f /tmp/frontend.log"
+echo "  Backend:   tail -f /tmp/node-server.log"
+echo "  Python:    tail -f /tmp/python-service.log"
 echo ""
-echo "💡 For phone access, run ngrok in another terminal:"
-echo "   ngrok http 3001"
-echo ""
-
-# Wait for user to press Ctrl+C
-trap "echo ''; echo '🛑 Stopping all services...'; kill $PYTHON_PID $NODE_PID $VITE_PID; exit" INT
-
-# Keep script running
-wait
+echo "🛑 To stop all services: ./stop-all.sh"

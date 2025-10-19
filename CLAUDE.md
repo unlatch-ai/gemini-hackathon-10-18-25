@@ -4,15 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **Live Video Safety Application** that uses Gemini Live API for real-time panic codeword detection and automated emergency response. The system provides a discreet way for users to exit dangerous situations through AI-powered audio/video monitoring and automated phone call triggers.
+This is a **Live Video Safety Application** that uses Gemini Live API for real-time panic codeword detection and automated emergency response. The system provides a discreet way for users to exit dangerous situations through AI-powered audio/video monitoring and a web-based fake call interface with voice agent.
 
 **Core Functionality:**
 1. User accesses app on smartphone via ngrok URL
 2. Starts recording video/audio which streams to Gemini Live API
-3. Gemini monitors audio in real-time for panic codeword (e.g., "help me mom")
-4. When detected, Twilio automatically initiates a fake phone call
-5. User can use the call as an excuse to leave the situation
-6. After recording stops, system analyzes and categorizes the incident
+3. Multi-agent Gemini system analyzes conversation every 10 seconds (4 specialized agents)
+4. When dangerous situation detected (70%+ confidence), triggers fake call UI
+5. iPhone-style call interface appears with ringtone
+6. User accepts call and converses with ElevenLabs-powered voice agent (Mom/Friend/Sister)
+7. Agent provides believable excuse to leave the situation immediately
 
 AI Studio App: https://ai.studio/apps/drive/13ZxrTpztNKibK7zwxXn9Joto0oFEonoB
 
@@ -21,7 +22,7 @@ AI Studio App: https://ai.studio/apps/drive/13ZxrTpztNKibK7zwxXn9Joto0oFEonoB
 **Install dependencies:**
 ```bash
 npm install
-pip install google-genai twilio
+pip install google-genai elevenlabs gtts
 ```
 
 **Run frontend dev server only:**
@@ -57,12 +58,18 @@ npm run preview
 Create a `.env.local` file with the following:
 ```
 GEMINI_API_KEY=your_gemini_api_key_here
-TWILIO_ACCOUNT_SID=your_twilio_account_sid
-TWILIO_AUTH_TOKEN=your_twilio_auth_token
-TWILIO_PHONE_NUMBER=your_twilio_phone_number
+GOOGLE_CLOUD_API_KEY=your_google_cloud_api_key (optional, for TTS fallback)
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
 PORT=3001
-PANIC_CODEWORD=help me mom
+PANIC_CODEWORD=danger
+BASE_URL=https://your-ngrok-url.ngrok-free.dev
+PYTHON_SERVICE_URL=http://localhost:5001
 ```
+
+**Note:** The system has multiple TTS fallbacks:
+1. **Primary:** ElevenLabs (high quality, natural voices)
+2. **Secondary:** Google Cloud TTS (if ElevenLabs fails)
+3. **Tertiary:** gTTS (free, always works)
 
 The Vite config ([vite.config.ts:14-15](vite.config.ts#L14-L15)) exposes environment variables to the frontend.
 
@@ -75,53 +82,52 @@ User Smartphone (via ngrok URL)
     ↓
 Frontend: Video/Audio Capture (MediaRecorder API)
     ↓
-WebSocket Connection
+WebSocket Connection to Backend
     ↓
 Backend Proxy (Node.js Express)
     ↓
-Python Service → Gemini Live API
+Python Service → Gemini Multi-Agent Analysis
+    ├── Agent 1: Transcript Analyzer (literal content)
+    ├── Agent 2: Emotional Detector (distress signals)
+    ├── Agent 3: Context Interpreter (social dynamics)
+    └── Agent 4: Threat Assessor (final decision)
     ↓
-Real-time Analysis + Codeword Detection
+[If danger ≥70%] → Frontend Triggers FakeCallUI
     ↓
-[If codeword detected] → Twilio Voice Call Trigger
+User Accepts Call → Bidirectional Voice Conversation
+    ↓
+ElevenLabs Voice Agent (Mom/Friend/Sister)
 ```
 
 ### Component Structure
 
 **Frontend Components:**
-- [VideoRecorder.tsx](components/VideoRecorder.tsx) - Main recording interface with camera/mic access
+- [SafetyRecorder.tsx](components/SafetyRecorder.tsx) - Main recording interface with camera/mic access
+- [FakeCallUI.tsx](components/FakeCallUI.tsx) - iPhone-style fake call interface with voice agent
 - [SessionDashboard.tsx](components/SessionDashboard.tsx) - Real-time monitoring display
 - [IncidentReports.tsx](components/IncidentReports.tsx) - Post-recording analysis view
-- [ModelSelector.tsx](components/ModelSelector.tsx) - Gemini model configuration
 
 **Backend Structure:**
 
 [server/index.js](server/index.js) - Main Express server
-- WebSocket proxy for Gemini Live connections
+- WebSocket proxy for Gemini analysis
 - REST API endpoints for session management
-- Twilio voice call orchestration
 
-[server/routes/gemini-live.js](server/routes/gemini-live.js) - Gemini Live API WebSocket proxy
+[server/routes/live-session.js](server/routes/live-session.js) - Main API routes
 - Handles client WebSocket connections
-- Proxies to Python service for Gemini Live API
-- Manages session state and reconnection
-
-[server/routes/twilio-voice.js](server/routes/twilio-voice.js) - Twilio voice integration
-- Triggers outbound calls when codeword detected
-- Serves TwiML for fake conversation scripts
-- Manages call state and hangup logic
-
-**Services:**
-- [server/services/codeword-detector.js](server/services/codeword-detector.js) - Monitors Gemini responses for panic codeword
-- [server/services/twilio-caller.js](server/services/twilio-caller.js) - Orchestrates fake phone calls
-- [server/services/post-analysis.js](server/services/post-analysis.js) - Categorizes incidents after recording ends
+- Proxies to Python service for Gemini multi-agent analysis
+- `/elevenlabs-audio` - Text-to-speech endpoint
+- `/converse` - Bidirectional voice conversation endpoint
+- Manages session state and danger detection webhooks
 
 **Python Microservice:**
-- [python/live_stream_handler.py](python/live_stream_handler.py) - Handles Gemini Live API streaming
-  - Manages WebSocket connection to Gemini Live API
-  - Converts audio/video to proper format (16-bit PCM, 16kHz for audio)
-  - Processes responses and detects function calls
-  - Uses `gemini-2.5-flash-native-audio-preview-09-2025` model
+- [python/live_stream_handler.py](python/live_stream_handler.py) - Core AI processing service
+  - Multi-agent Gemini analysis system (4 specialized agents)
+  - ElevenLabs TTS integration with fallback chain
+  - Speech-to-text transcription
+  - Conversational AI with persona support (Mom/Friend/Sister)
+  - `/api/generate-audio` - Text-to-speech with ElevenLabs
+  - `/api/converse` - Full conversational turn (STT → LLM → TTS)
 
 ### Type System
 
@@ -152,34 +158,46 @@ When you detect this phrase, immediately call the function trigger_emergency_cal
 Otherwise, remain silent and continue monitoring.
 ```
 
-**Function Calling**:
-- `trigger_emergency_call()` - Called when codeword detected
-- Backend receives function call and initiates Twilio call
+**Multi-Agent Analysis System**:
+The system uses 4 specialized Gemini agents that analyze conversations in parallel:
+- **Agent 1: Transcript Analyzer** - Analyzes literal content and keywords
+- **Agent 2: Emotional Detector** - Detects stress, fear, anxiety signals
+- **Agent 3: Context Interpreter** - Understands power dynamics and social context
+- **Agent 4: Threat Assessor** - Meta-agent that synthesizes all inputs
 
-### Twilio Voice Integration
+### ElevenLabs Voice Agent Integration
 
-**Fake Call Flow**:
-1. Codeword detected → Backend calls Twilio API
-2. Twilio initiates call to user's phone number
-3. User answers → TwiML script plays pre-recorded conversation
-4. Conversation options:
-   - Mom calling about dinner plans
-   - Friend with car emergency
-   - Work emergency
-   - Customizable scripts
+**Voice Personas Available:**
+- **Rachel (Mom)** - Warm, maternal voice with family emergency scenarios
+- **Adam (Friend Alex)** - Casual, friendly voice with car/meeting emergencies
+- **Bella (Sister Sarah)** - Sibling voice with apartment/pet emergencies
 
-**TwiML Example**:
-```xml
-<Response>
-  <Say voice="Polly.Joanna">
-    Hey! It's mom. We're running late for dinner.
-    Can you come over in the next 10 minutes?
-  </Say>
-  <Pause length="3"/>
-  <Say>Okay great, see you soon!</Say>
-  <Hangup/>
-</Response>
+**Fake Call Flow:**
+1. Danger detected (≥70% confidence) → Frontend triggers FakeCallUI
+2. iPhone-style call interface appears with ringtone
+3. User accepts call → Initial greeting plays via ElevenLabs TTS
+4. User speaks → Audio captured and sent to `/api/live/converse`
+5. Python service:
+   - Transcribes speech with Gemini
+   - Generates contextual response with persona
+   - Converts to speech with ElevenLabs
+6. Response audio plays → Conversation continues
+7. User can end call anytime
+
+**Conversational Flow Example:**
 ```
+User accepts call
+→ "Hey! I'm almost at the ferry building. Can you come meet me right now? It's urgent!"
+User: "Okay, where are you exactly?"
+→ "I'm at the main entrance by the clock tower. Can you come in the next 5 minutes?"
+User: "Yeah I'll head out now"
+→ "Perfect, see you soon!"
+```
+
+**TTS Fallback Chain:**
+1. **ElevenLabs** (primary) - Natural, high-quality voices
+2. **Google Cloud TTS** (secondary) - Reliable neural voices
+3. **gTTS** (tertiary) - Free, always works
 
 ### Post-Recording Analysis
 
@@ -203,33 +221,41 @@ TypeScript and Vite are configured with `@/*` alias pointing to project root ([t
 ## Key Implementation Notes
 
 - **Client-to-Server Architecture**: Frontend connects directly to backend WebSocket proxy for optimal streaming performance
-- **Hybrid Tech Stack**: Node.js for server + Python for Gemini Live API integration (Python SDK more mature)
-- **Real-time Requirements**: Codeword detection must happen within 2-3 seconds for effective emergency response
+- **Hybrid Tech Stack**: Node.js for server + Python for Gemini/ElevenLabs integration (Python SDK more mature)
+- **Real-time Requirements**: Multi-agent analysis runs every 10 seconds, danger detection triggers immediately
 - **Mobile-First**: UI optimized for smartphone use, large touch targets, minimal interactions during recording
-- **Privacy**: Sessions can be configured to not store video/audio, only metadata and transcripts
+- **Privacy**: All voice processing happens in-browser, no external phone service involved
 - **Offline Fallback**: If connection lost, local recording continues and uploads when reconnected
+- **TTS Resilience**: Triple fallback system (ElevenLabs → Google → gTTS) ensures voice agent always works
 
 ## Security Considerations
 
-- Use **ephemeral tokens** for Gemini Live API authentication (not API keys in frontend)
-- Twilio credentials stored server-side only
-- Session data encrypted in transit (WSS/HTTPS)
+- Use **ephemeral tokens** for Gemini API authentication (not API keys in frontend)
+- ElevenLabs API key stored server-side only
+- Session data encrypted in transit (WSS/HTTPS via ngrok)
 - Optional: End-to-end encryption for stored recordings
-- Rate limiting on fake call triggers to prevent abuse
+- Rate limiting on danger detection to prevent false positives
 - User authentication required for production deployment
+- **Important**: See `archive/twilio/` for archived phone call integration (replaced with web-based agent)
 
 ## Development Workflow
 
 1. **Local Development**: Use ngrok to test on real smartphone
-2. **Testing Codeword Detection**: Start recording, say codeword, verify call triggers
-3. **TwiML Testing**: Use Twilio console to test voice scripts
-4. **Session Analysis**: Stop recording, verify categorization accuracy
+2. **Start Services**: Run `npm run server` (port 3001) and `python3 python/live_stream_handler.py` (port 5001)
+3. **Testing Danger Detection**: Start recording, say "danger", verify FakeCallUI appears
+4. **Testing Voice Agent**: Accept fake call, speak to agent, verify natural conversation
+5. **Testing Personas**: Try different personas (rachel/adam/bella) for variety
+6. **Session Analysis**: Stop recording, verify multi-agent scores displayed
 
-## Migration Notes
+## Architecture Evolution
 
-This project was previously a SF 311 WhatsApp reporting bot. Key architectural changes:
+**October 2025 - ElevenLabs Voice Agent Migration:**
+- **Removed**: Twilio phone call integration (archived in `archive/twilio/`)
+- **Added**: Web-based fake call UI with ElevenLabs conversational agent
+- **Benefits**: No phone service needed, better privacy, natural conversations, faster response
+- **Retained**: Multi-agent Gemini analysis, WebSocket architecture, Python microservice
 
-- **From**: Text-based WhatsApp messages → Gemini analysis → 311 submission
-- **To**: Live video/audio → Gemini Live monitoring → Emergency call trigger
-- **Retained**: Gemini AI integration, Twilio integration, dashboard UI framework
-- **New**: Real-time streaming, WebSocket architecture, Python microservice, voice calls
+**Previous Migrations:**
+- **From**: SF 311 WhatsApp reporting bot → Live safety monitoring
+- **Key Changes**: Text messages → Real-time video/audio analysis
+- **Retained**: Gemini AI integration, dashboard UI framework

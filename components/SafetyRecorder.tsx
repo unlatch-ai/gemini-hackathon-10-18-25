@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import FakeCallUI from './FakeCallUI';
 
 interface SafetyRecorderProps {
   onCodewordDetected?: () => void;
@@ -21,6 +22,8 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
   const [dangerScore, setDangerScore] = useState<number | null>(null);
   const [agentScores, setAgentScores] = useState<AgentScores | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [showFakeCall, setShowFakeCall] = useState(false);
+  const [testPersona, setTestPersona] = useState<'rachel' | 'adam' | 'bella'>('adam');
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -47,8 +50,20 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
     };
   }, []);
 
+  const handleAcceptCall = () => {
+    console.log('✅ SafetyRecorder: handleAcceptCall called - keeping FakeCallUI visible');
+    // Don't hide the FakeCallUI - let it handle the internal state transition
+    // The FakeCallUI component will switch from ringing to in-call state
+  };
+
+  const handleDeclineCall = () => {
+    console.log('❌ SafetyRecorder: handleDeclineCall called - hiding FakeCallUI');
+    setShowFakeCall(false);
+  };
+
   const startRecording = async () => {
     try {
+      console.log('🚀 START RECORDING BUTTON CLICKED');
       setStatus('connecting');
 
       // Connect to WebSocket (works with ngrok via Vite proxy)
@@ -56,15 +71,20 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
       const host = window.location.host; // includes port
       const wsUrl = import.meta.env.VITE_WS_URL || `${protocol}//${host}/ws/live-session`;
 
-      console.log('Connecting to WebSocket:', wsUrl);
+      console.log('🔌 Attempting WebSocket connection to:', wsUrl);
+      console.log('   Protocol:', protocol);
+      console.log('   Host:', host);
+      console.log('   Full URL:', wsUrl);
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = async () => {
-        console.log('✅ WebSocket connected');
+        console.log('✅ WebSocket CONNECTED successfully!');
+        console.log('   ReadyState:', ws.readyState);
         setStatus('connected');
 
         // Start video + audio recording
+        console.log('📹 Requesting camera and microphone permissions...');
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -81,10 +101,14 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
           });
 
           streamRef.current = stream;
+          console.log('✅ Camera/Mic permissions GRANTED!');
+          console.log('   Video tracks:', stream.getVideoTracks().length);
+          console.log('   Audio tracks:', stream.getAudioTracks().length);
 
           // Display video feed
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
+            console.log('📺 Video feed attached to video element');
           }
 
           // Create audio-only MediaRecorder for Gemini (simpler than extracting from video)
@@ -93,6 +117,7 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
             mimeType: 'audio/webm;codecs=opus'
           });
           mediaRecorderRef.current = mediaRecorder;
+          console.log('🎙️ MediaRecorder created with codec:', mediaRecorder.mimeType);
 
           // Send audio chunks to backend
           mediaRecorder.ondataavailable = async (event) => {
@@ -111,6 +136,7 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
           };
 
           mediaRecorder.start(1000); // Send chunks every second
+          console.log('🔴 MediaRecorder STARTED - sending chunks every 1 second');
           setIsRecording(true);
           setStatus('recording');
 
@@ -118,9 +144,12 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
           timerRef.current = setInterval(() => {
             setRecordingTime(prev => prev + 1);
           }, 1000);
+          console.log('⏱️ Recording timer started');
 
           // Send start recording message
+          console.log('📤 Sending start_recording message to backend...');
           ws.send(JSON.stringify({ type: 'start_recording' }));
+          console.log('✅ start_recording message sent!');
 
           // Start Web Speech API for continuous speech recognition
           if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -195,9 +224,18 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
             break;
 
           case 'codeword_detected':
-            console.log('🚨 DANGER DETECTED!', data);
+            console.log('🚨🚨🚨 DANGER DETECTED! 🚨🚨🚨');
+            console.log('   Full data:', data);
+            console.log('   Phrase:', data.phrase);
+            console.log('   Confidence:', data.confidence);
+            console.log('   Agent Scores:', data.agentScores);
+
             setAnalyzing(false);
             setDangerDetected(true);
+
+            console.log('🎭 Setting showFakeCall to TRUE - ringtone should play now!');
+            setShowFakeCall(true);
+
             setDangerScore(data.confidence ? Math.round(data.confidence * 100) : null);
             // Extract agent scores if available
             if (data.agentScores) {
@@ -205,8 +243,10 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
             }
             setStatus('danger_detected');
             if (onCodewordDetected) {
+              console.log('📞 Calling onCodewordDetected callback');
               onCodewordDetected();
             }
+            console.log('✅ Fake call UI should be visible now. showFakeCall =', true);
             break;
 
           case 'call_triggered':
@@ -228,12 +268,17 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
       };
 
       ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
+        console.error('❌❌❌ WebSocket ERROR:', error);
+        console.error('   Error type:', error.type);
+        console.error('   Current readyState:', ws.readyState);
         setStatus('error');
       };
 
-      ws.onclose = () => {
-        console.log('WebSocket closed');
+      ws.onclose = (event) => {
+        console.log('🔌 WebSocket CLOSED');
+        console.log('   Code:', event.code);
+        console.log('   Reason:', event.reason);
+        console.log('   Was clean:', event.wasClean);
         setStatus('disconnected');
       };
 
@@ -270,10 +315,10 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
 
   const testDangerPhrase = async () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('🧪 Testing multi-agent danger detection...');
+      console.log('🧪 Testing instant danger keyword detection...');
       wsRef.current.send(JSON.stringify({
         type: 'trigger_codeword',
-        text: "I'm feeling really unsafe and uncomfortable right now. I want to leave but I can't."
+        text: "danger danger - I'm feeling really unsafe and uncomfortable right now. I want to leave but I can't."
       }));
     }
   };
@@ -303,6 +348,7 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
 
   return (
     <div className="bg-gray-800 rounded-lg shadow-lg p-6 max-w-2xl mx-auto">
+      {showFakeCall && <FakeCallUI onAccept={handleAcceptCall} onDecline={handleDeclineCall} persona={testPersona} />}
       <h2 className="text-2xl font-bold text-white mb-6 text-center">
         🛡️ Safety Monitor
       </h2>
@@ -425,13 +471,39 @@ const SafetyRecorder: React.FC<SafetyRecorderProps> = ({ onCodewordDetected }) =
       {/* Control Buttons */}
       <div className="space-y-3">
         {!isRecording ? (
-          <button
-            onClick={startRecording}
-            disabled={status === 'connecting'}
-            className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white font-bold py-4 px-6 rounded-lg transition-colors text-lg"
-          >
-            {status === 'connecting' ? 'Connecting...' : '🎙️ Start Safety Recording'}
-          </button>
+          <>
+            <button
+              onClick={startRecording}
+              disabled={status === 'connecting'}
+              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white font-bold py-4 px-6 rounded-lg transition-colors text-lg"
+            >
+              {status === 'connecting' ? 'Connecting...' : '🎙️ Start Safety Recording'}
+            </button>
+            {/* Direct test button with persona selector */}
+            <div className="bg-purple-900/30 border border-purple-500/30 rounded-lg p-3">
+              <label className="block text-sm text-purple-300 mb-2">
+                Choose Voice Persona:
+              </label>
+              <select
+                value={testPersona}
+                onChange={(e) => setTestPersona(e.target.value as 'rachel' | 'adam' | 'bella')}
+                className="w-full bg-gray-700 text-white rounded px-3 py-2 mb-3"
+              >
+                <option value="rachel">👩 Rachel (Mom) - Warm, maternal</option>
+                <option value="adam">👨 Adam (Friend) - Casual, friendly</option>
+                <option value="bella">👧 Bella (Sister) - Sibling energy</option>
+              </select>
+              <button
+                onClick={() => {
+                  console.log(`🧪 TEST BUTTON: Triggering fake call with ${testPersona} persona!`);
+                  setShowFakeCall(true);
+                }}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition-colors"
+              >
+                📞 Test Fake Call (Direct)
+              </button>
+            </div>
+          </>
         ) : (
           <>
             <button

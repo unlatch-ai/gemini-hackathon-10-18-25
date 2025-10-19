@@ -17,8 +17,8 @@ class TwilioCaller {
       const call = await this.client.calls.create({
         to: this.userNumber,
         from: this.fromNumber,
-        url: `${baseUrl}/twilio/voice?scenario=${scenario}`,
-        statusCallback: `${baseUrl}/twilio/status`,
+        url: `${baseUrl}/api/live/voice?scenario=${scenario}`,
+        statusCallback: `${baseUrl}/api/live/status`,
         statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
       });
 
@@ -39,6 +39,7 @@ class TwilioCaller {
   }
 
   getTwiML(scenario = 'mom') {
+    const baseUrl = config.BASE_URL || `http://localhost:${config.PORT}`;
     const scenarios = {
       mom: `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -76,6 +77,20 @@ class TwilioCaller {
   <Say voice="Polly.Amy">
     Great, we'll see you in 15 minutes. Thanks!
   </Say>
+  <Hangup/>
+</Response>`,
+      elevenlabs: `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${baseUrl}/api/live/elevenlabs-audio?text=Hey+sweetie,+it's+mom.+Something+urgent+came+up+with+your+dad+and+I+really+need+you+to+come+home+right+now.+Can+you+leave+and+head+over?&voice=Rachel</Play>
+  <Pause length="5"/>
+  <Play>${baseUrl}/api/live/elevenlabs-audio?text=Perfect,+see+you+in+a+few+minutes.+Thank+you+honey!&voice=Rachel</Play>
+  <Hangup/>
+</Response>`,
+      friend_elevenlabs: `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${baseUrl}/api/live/elevenlabs-audio?text=Hey!+My+car+just+broke+down+on+the+highway.+Can+you+come+pick+me+up+right+now?+I'm+near+the+Market+Street+exit.&voice=Adam</Play>
+  <Pause length="4"/>
+  <Play>${baseUrl}/api/live/elevenlabs-audio?text=Thanks,+I'll+send+you+my+exact+location.+Please+hurry!&voice=Adam</Play>
   <Hangup/>
 </Response>`
     };

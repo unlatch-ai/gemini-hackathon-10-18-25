@@ -2,12 +2,53 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import axios from 'axios';
 import { config } from '../config.js';
-import twilioCaller from '../services/twilio-caller.js';
 
 const router = express.Router();
 
+// New route to proxy audio generation with ElevenLabs
+router.get('/elevenlabs-audio', async (req, res) => {
+  try {
+    const { text, voice } = req.query;
+    console.log(`🎙️ ElevenLabs audio request - Text: "${text}", Voice: ${voice || 'default'}`);
+
+    if (!text) {
+      console.error('❌ Missing text parameter');
+      return res.status(400).send('Missing text parameter');
+    }
+
+    console.log(`📡 Forwarding to Python service: ${config.PYTHON_SERVICE_URL}/api/generate-audio`);
+
+    const response = await axios.post(
+      `${config.PYTHON_SERVICE_URL}/api/generate-audio`,
+      { text, voice },
+      {
+        responseType: 'stream',
+        timeout: 60000 // 60 second timeout for audio generation (ElevenLabs can be slow)
+      }
+    );
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    response.data.pipe(res);
+
+    console.log(`✅ Audio stream sent successfully`);
+
+  } catch (error) {
+    console.error('❌ Error proxying audio:', error.message);
+    if (error.code === 'ECONNREFUSED') {
+      console.error(`   Python service not running at ${config.PYTHON_SERVICE_URL}`);
+      res.status(503).send('Python service unavailable. Please start it with: python3 python/live_stream_handler.py');
+    } else {
+      res.status(500).send('Error generating audio: ' + error.message);
+    }
+  }
+});
+
 // Store active WebSocket connections
 const activeConnections = new Map();
+
+// Track video frames for periodic analysis
+const frameCounters = new Map();
+const ANALYZE_EVERY_N_FRAMES = 3;  // Analyze every 3rd frame (~4.5 seconds)
 
 // Create WebSocket server (will be attached to HTTP server)
 export function setupWebSocket(server) {
@@ -46,6 +87,29 @@ export function setupWebSocket(server) {
             await handleVideoChunk(sessionId, data.video);
             break;
 
+          case 'video_frame':
+            // Broadcast video frame to all connected clients IMMEDIATELY (no blocking)
+            broadcastToAll(data);
+
+            // Analyze frame periodically with Gemini Vision (ASYNC - non-blocking)
+            const counter = (frameCounters.get(sessionId) || 0) + 1;
+            frameCounters.set(sessionId, counter);
+
+            if (counter % ANALYZE_EVERY_N_FRAMES === 0) {
+              // Fire and forget - don't await, don't block the video stream
+              setImmediate(() => {
+                analyzeFrame(data.sessionId, data.frame).catch(err => {
+                  console.error(`Error analyzing frame: ${err.message}`);
+                });
+              });
+            }
+            break;
+
+          case 'location_update':
+            // Broadcast location update to all connected clients
+            broadcastToAll(data);
+            break;
+
           case 'trigger_codeword':
             await handleTriggerCodeword(sessionId, data.text);
             break;
@@ -79,6 +143,58 @@ export function setupWebSocket(server) {
   });
 
   return wss;
+}
+
+// Analyze video frame with Gemini Vision API
+async function analyzeFrame(sessionId, frameData) {
+  try {
+    console.log(`🔍 Analyzing frame for session ${sessionId}...`);
+
+    const response = await axios.post(
+      `${config.PYTHON_SERVICE_URL}/api/analyze-frame`,
+      {
+        sessionId,
+        frame: frameData
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 15000  // 15 second timeout for AI analysis
+      }
+    );
+
+    const analysis = response.data;
+    console.log(`✅ Frame analysis: ${analysis.analysis.substring(0, 80)}...`);
+
+    // Broadcast analysis results to all connected clients
+    broadcastToAll({
+      type: 'vision_analysis',
+      sessionId,
+      analysis: analysis.analysis,
+      analyzed: analysis.analyzed,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`Error analyzing frame: ${error.message}`);
+  }
+}
+
+// Broadcast message to all connected clients
+function broadcastToAll(data) {
+  const message = JSON.stringify(data);
+  let sentCount = 0;
+
+  activeConnections.forEach((client, clientSessionId) => {
+    if (client.readyState === 1) { // 1 = OPEN
+      client.send(message);
+      sentCount++;
+    }
+  });
+
+  // Only log occasionally to avoid spam (every 10th frame for video_frame)
+  if (data.type !== 'video_frame' || Math.random() < 0.1) {
+    console.log(`📤 Broadcast ${data.type} to ${sentCount} clients`);
+  }
 }
 
 async function handleStartRecording(sessionId, ws) {
@@ -194,10 +310,14 @@ function startListeningForCodeword(sessionId, ws) {
 router.post('/codeword-detected', async (req, res) => {
   const { type, session_id, detected_phrase, confidence, timestamp, danger_score, agent_scores } = req.body;
 
+  console.log(`📥 Received codeword-detected notification:`, { type, session_id, detected_phrase, confidence });
+  console.log(`   Active connections:`, Array.from(activeConnections.keys()));
+
   // Get the WebSocket connection for this session
   const ws = activeConnections.get(session_id);
 
   if (!ws || ws.readyState !== 1) {
+    console.error(`❌ WebSocket not found or not open! ws exists: ${!!ws}, readyState: ${ws?.readyState}`);
     return res.status(404).json({ error: 'WebSocket not found or not open' });
   }
 
@@ -226,76 +346,93 @@ router.post('/codeword-detected', async (req, res) => {
   console.log(`🚨 CODEWORD DETECTED! Session: ${session_id}`);
   console.log(`   Phrase: "${detected_phrase}"`);
   console.log(`   Confidence: ${confidence}`);
+  console.log(`   WebSocket exists: ${!!ws}`);
+  console.log(`   WebSocket readyState: ${ws ? ws.readyState : 'N/A'}`);
 
   if (ws && ws.readyState === 1) {  // 1 = OPEN
     // Notify frontend immediately
-    ws.send(JSON.stringify({
+    const message = JSON.stringify({
       type: 'codeword_detected',
       sessionId: session_id,
       phrase: detected_phrase,
       confidence: confidence,
       timestamp: timestamp || new Date().toISOString(),
       agentScores: agent_scores  // Include agent breakdown
-    }));
+    });
+    console.log(`📤 SENDING WebSocket message to frontend:`, message);
+    ws.send(message);
+    console.log(`✅ WebSocket message SENT successfully!`);
 
-    // Trigger Twilio call
-    try {
-      const callResult = await twilioCaller.triggerFakeCall(session_id, 'mom');
-
-      if (callResult.success) {
-        console.log(`✅ Emergency call triggered! Call SID: ${callResult.callSid}`);
-
-        ws.send(JSON.stringify({
-          type: 'call_triggered',
-          sessionId: session_id,
-          callSid: callResult.callSid,
-          scenario: callResult.scenario
-        }));
-
-        // Log the emergency event (in production, save to database)
-        console.log(`📋 Emergency Response Log:
-          Session: ${session_id}
-          Detected: "${detected_phrase}"
-          Confidence: ${Math.round(confidence * 100)}%
-          Call SID: ${callResult.callSid}
-          Timestamp: ${timestamp}
-        `);
-      } else {
-        console.error(`❌ Failed to trigger call: ${callResult.error}`);
-        ws.send(JSON.stringify({
-          type: 'call_failed',
-          sessionId: session_id,
-          error: callResult.error
-        }));
-      }
-    } catch (error) {
-      console.error('Error triggering call:', error);
-      ws.send(JSON.stringify({
-        type: 'call_failed',
-        sessionId: session_id,
-        error: error.message
-      }));
-    }
+    // Twilio call triggering disabled - using web-based voice agent instead
+    // See /converse endpoint for ElevenLabs voice agent interaction
   }
 
   res.json({ status: 'processed', session_id });
 });
 
-// Twilio voice webhook (serves TwiML)
-router.post('/voice', (req, res) => {
-  const scenario = req.query.scenario || 'mom';
-  console.log(`📞 Twilio voice webhook called with scenario: ${scenario}`);
+// Twilio routes disabled - using web-based voice agent instead
 
-  const twiml = twilioCaller.getTwiML(scenario);
-  res.type('text/xml');
-  res.send(twiml);
+router.post('/converse', async (req, res) => {
+  try {
+    const audioBlob = req.body;
+    const persona = req.query.persona || 'adam'; // Default to Adam persona
+
+    console.log(`🎙️ Converse request - Persona: ${persona}`);
+
+    const response = await axios.post(
+      `${config.PYTHON_SERVICE_URL}/api/converse?persona=${persona}`,
+      audioBlob,
+      {
+        headers: { 'Content-Type': 'application/octet-stream' },
+        responseType: 'stream',
+        timeout: 30000 // 30 second timeout
+      }
+    );
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    response.data.pipe(res);
+
+  } catch (error) {
+    console.error('Error in converse proxy:', error.message);
+    if (error.code === 'ECONNREFUSED') {
+      res.status(503).send('Python service unavailable');
+    } else {
+      res.status(500).send('Error processing conversation');
+    }
+  }
 });
 
-// Twilio status callback
-router.post('/status', (req, res) => {
-  const { CallSid, CallStatus, From, To } = req.body;
-  console.log(`📊 Call ${CallSid} status: ${CallStatus} (${From} → ${To})`);
-  res.sendStatus(200);
+// NEW: Text-based conversation endpoint (no audio transcription needed)
+router.get('/converse-text', async (req, res) => {
+  try {
+    const { persona = 'adam', text } = req.query;
+
+    console.log(`💬 Converse-text request - Persona: ${persona}, Text: "${text}"`);
+
+    if (!text) {
+      return res.status(400).send('Missing text parameter');
+    }
+
+    const response = await axios.get(
+      `${config.PYTHON_SERVICE_URL}/api/converse-text`,
+      {
+        params: { persona, text },
+        responseType: 'stream',
+        timeout: 30000
+      }
+    );
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    response.data.pipe(res);
+
+  } catch (error) {
+    console.error('Error in converse-text proxy:', error.message);
+    if (error.code === 'ECONNREFUSED') {
+      res.status(503).send('Python service unavailable');
+    } else {
+      res.status(500).send('Error processing conversation: ' + error.message);
+    }
+  }
 });
 
 export default router;
