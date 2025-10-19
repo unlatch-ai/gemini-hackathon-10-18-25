@@ -35,7 +35,7 @@ const LandingPage: React.FC = () => {
                 <li>✓ Record audio/video</li>
                 <li>✓ AI threat detection</li>
                 <li>✓ Emergency call trigger</li>
-                <li>✓ Say "danger" for help</li>
+                <li>✓ Say "gemini" for help</li>
               </ul>
               <button className="mt-6 bg-white text-green-800 font-bold py-3 px-6 rounded-full hover:bg-green-100 transition">
                 Open Mobile View →
@@ -81,7 +81,7 @@ const LandingPage: React.FC = () => {
             </div>
             <div>
               <div className="text-4xl mb-2">3️⃣</div>
-              <p className="text-sm text-gray-300">Say "danger" if you need help</p>
+              <p className="text-sm text-gray-300">Say "gemini" if you need help</p>
             </div>
             <div>
               <div className="text-4xl mb-2">4️⃣</div>

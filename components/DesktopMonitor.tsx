@@ -297,7 +297,7 @@ const DesktopMonitor: React.FC = () => {
               <p className="text-sm text-gray-500">
                 {activeSessions.length === 0
                   ? 'Waiting for mobile to connect and start recording...'
-                  : 'Camera not active. Say "danger" to activate emergency mode.'}
+                  : 'Camera not active. Say "gemini" to activate emergency mode.'}
               </p>
             </div>
           )}

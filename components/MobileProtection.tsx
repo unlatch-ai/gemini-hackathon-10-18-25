@@ -259,8 +259,8 @@ const MobileProtection: React.FC = () => {
             console.log('🎤 Heard:', transcript);
 
             // Check for danger keyword
-            if (transcript.includes('danger')) {
-              console.log('🚨 DANGER KEYWORD DETECTED IN SPEECH!');
+            if (transcript.includes('gemini')) {
+              console.log('🚨 GEMINI KEYWORD DETECTED IN SPEECH!');
               console.log('📹 STARTING VIDEO STREAMING TO DESKTOP NOW!');
 
               // START VIDEO STREAMING when danger is detected
@@ -307,7 +307,7 @@ const MobileProtection: React.FC = () => {
 
         recognitionRef.current = recognition;
         recognition.start();
-        console.log('👂 Listening for "danger" keyword...');
+        console.log('👂 Listening for "gemini" keyword...');
       }
 
       console.log('✅ Recording started');
@@ -463,7 +463,7 @@ const MobileProtection: React.FC = () => {
                   Monitoring your surroundings
                 </p>
                 <p className="text-gray-500 text-sm mt-2">
-                  Say <span className="text-red-400 font-bold">"danger"</span> if you need help
+                  Say <span className="text-red-400 font-bold">"gemini"</span> if you need help
                 </p>
               </div>
 

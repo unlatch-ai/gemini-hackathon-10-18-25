@@ -242,7 +242,7 @@ TypeScript and Vite are configured with `@/*` alias pointing to project root ([t
 
 1. **Local Development**: Use ngrok to test on real smartphone
 2. **Start Services**: Run `npm run server` (port 3001) and `python3 python/live_stream_handler.py` (port 5001)
-3. **Testing Danger Detection**: Start recording, say "danger", verify FakeCallUI appears
+3. **Testing Danger Detection**: Start recording, say "gemini", verify FakeCallUI appears
 4. **Testing Voice Agent**: Accept fake call, speak to agent, verify natural conversation
 5. **Testing Personas**: Try different personas (rachel/adam/bella) for variety
 6. **Session Analysis**: Stop recording, verify multi-agent scores displayed
